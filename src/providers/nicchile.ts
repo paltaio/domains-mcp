@@ -108,6 +108,9 @@ function parseDomainResult(
   whoisRequested: boolean,
 ): DomainResult {
   const available = html.includes("Nombre de dominio no existe.");
+  const pendingDeletion = html.includes(
+    "Este dominio está en proceso de eliminación.",
+  );
 
   const result: DomainResult = {
     domain,
@@ -117,7 +120,11 @@ function parseDomainResult(
     provider: "nicchile",
   };
 
-  if (!available && whoisRequested) {
+  if (pendingDeletion) {
+    result.status = "pending_deletion";
+  }
+
+  if (!available && !pendingDeletion && whoisRequested) {
     result.whois = parseWhois(html);
   } else if (!available) {
     result.whois = null;

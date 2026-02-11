@@ -19,6 +19,7 @@ export interface DomainResult {
     currency: string;
   } | null;
   provider: "iwantmyname" | "porkbun" | "nicchile";
+  status?: string;
   whois?: WhoisData | null;
 }
 

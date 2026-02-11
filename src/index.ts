@@ -14,7 +14,9 @@ import type {
 const config = loadConfig();
 
 function formatDomain(d: DomainResult): string {
-  const status = d.available ? "AVAILABLE" : "taken";
+  const status = d.status === "pending_deletion"
+    ? "PENDING DELETION"
+    : d.available ? "AVAILABLE" : "taken";
   const price = d.price
     ? `$${d.price.registration}` +
       (d.price.renewal !== d.price.registration
