@@ -3,8 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
-import { searchIwantmyname } from "./providers/iwantmyname.js";
-import { searchPorkbun } from "./providers/porkbun.js";
+import { searchIwantmyname, searchIwantmynameBulk } from "./providers/iwantmyname.js";
+import { searchPorkbun, searchPorkbunBulk } from "./providers/porkbun.js";
 import type {
   DomainResult,
   ProviderSearchResult,
@@ -48,6 +48,28 @@ function formatResults(results: ProviderSearchResult[]): string {
   return sections.join("\n\n");
 }
 
+function filterExact(
+  results: ProviderSearchResult[],
+  query: string,
+): ProviderSearchResult[] {
+  const target = query.trim().toLowerCase();
+  return results.map((r) => ({
+    ...r,
+    results: r.results.filter((d) => d.domain.toLowerCase() === target),
+  }));
+}
+
+function filterDomains(
+  results: ProviderSearchResult[],
+  domains: string[],
+): ProviderSearchResult[] {
+  const targets = new Set(domains.map((d) => d.trim().toLowerCase()));
+  return results.map((r) => ({
+    ...r,
+    results: r.results.filter((d) => targets.has(d.domain.toLowerCase())),
+  }));
+}
+
 function createMcpServer(): McpServer {
   const server = new McpServer({
     name: "domains-mcp",
@@ -58,6 +80,11 @@ function createMcpServer(): McpServer {
     query: z
       .string()
       .describe("Domain name to search, e.g. 'example.ai'"),
+    exact: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Only return the exact domain queried, no suggestions"),
     json: z
       .boolean()
       .optional()
@@ -72,11 +99,12 @@ function createMcpServer(): McpServer {
         "Search domain availability and pricing via iwantmyname",
       inputSchema: querySchema,
     },
-    async ({ query, json }) => {
+    async ({ query, exact, json }) => {
       const result = await searchIwantmyname(query);
+      const filtered = exact ? filterExact([result], query) : [result];
       const text = json
-        ? JSON.stringify(result, null, 2)
-        : formatResults([result]);
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
       return { content: [{ type: "text" as const, text }] };
     },
   );
@@ -87,11 +115,12 @@ function createMcpServer(): McpServer {
       description: "Search domain availability and pricing via Porkbun",
       inputSchema: querySchema,
     },
-    async ({ query, json }) => {
+    async ({ query, exact, json }) => {
       const result = await searchPorkbun(query);
+      const filtered = exact ? filterExact([result], query) : [result];
       const text = json
-        ? JSON.stringify(result, null, 2)
-        : formatResults([result]);
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
       return { content: [{ type: "text" as const, text }] };
     },
   );
@@ -103,15 +132,81 @@ function createMcpServer(): McpServer {
         "Search domain availability and pricing across all providers (iwantmyname + Porkbun) in parallel",
       inputSchema: querySchema,
     },
-    async ({ query, json }) => {
+    async ({ query, exact, json }) => {
       const searches: Promise<ProviderSearchResult>[] = [
         searchIwantmyname(query),
         searchPorkbun(query),
       ];
       const results = await Promise.all(searches);
+      const filtered = exact ? filterExact(results, query) : results;
       const text = json
-        ? JSON.stringify(results, null, 2)
-        : formatResults(results);
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
+      return { content: [{ type: "text" as const, text }] };
+    },
+  );
+
+  const bulkSchema = {
+    domains: z
+      .array(z.string())
+      .describe("List of full domain names, e.g. ['source.ai', 'test.dev']"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
+  };
+
+  server.registerTool(
+    "bulk_search_porkbun",
+    {
+      description:
+        "Check availability and pricing for multiple exact domains via Porkbun",
+      inputSchema: bulkSchema,
+    },
+    async ({ domains, json }) => {
+      const result = await searchPorkbunBulk(domains);
+      const filtered = filterDomains([result], domains);
+      const text = json
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
+      return { content: [{ type: "text" as const, text }] };
+    },
+  );
+
+  server.registerTool(
+    "bulk_search_iwantmyname",
+    {
+      description:
+        "Check availability and pricing for multiple exact domains via iwantmyname",
+      inputSchema: bulkSchema,
+    },
+    async ({ domains, json }) => {
+      const result = await searchIwantmynameBulk(domains);
+      const filtered = filterDomains([result], domains);
+      const text = json
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
+      return { content: [{ type: "text" as const, text }] };
+    },
+  );
+
+  server.registerTool(
+    "bulk_search_domains",
+    {
+      description:
+        "Check availability and pricing for multiple exact domains across all providers in parallel",
+      inputSchema: bulkSchema,
+    },
+    async ({ domains, json }) => {
+      const results = await Promise.all([
+        searchIwantmynameBulk(domains),
+        searchPorkbunBulk(domains),
+      ]);
+      const filtered = filterDomains(results, domains);
+      const text = json
+        ? JSON.stringify(filtered, null, 2)
+        : formatResults(filtered);
       return { content: [{ type: "text" as const, text }] };
     },
   );

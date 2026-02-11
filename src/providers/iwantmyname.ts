@@ -55,11 +55,30 @@ interface CheckResponse {
   premium?: Record<string, Record<string, string>>;
 }
 
+function extractCookieHeader(resp: Response): string {
+  const cookies = resp.headers.getSetCookie?.() ?? [];
+  return cookies
+    .map((c) => c.split(";")[0])
+    .join("; ");
+}
+
 export async function searchIwantmyname(
   query: string,
 ): Promise<ProviderSearchResult> {
+  return doSearch(query.trim().toLowerCase());
+}
+
+export async function searchIwantmynameBulk(
+  domains: string[],
+): Promise<ProviderSearchResult> {
+  const domainName = domains.map((d) => d.trim().toLowerCase()).join("\n");
+  return doSearch(domainName);
+}
+
+async function doSearch(
+  domainName: string,
+): Promise<ProviderSearchResult> {
   try {
-    // Step 1: Prepare domain list
     const prepareResp = await fetch(
       `${BASE_URL}/en/AvailabilityCheck-prepareDomainListForAjax.html`,
       {
@@ -72,7 +91,7 @@ export async function searchIwantmyname(
         },
         body: new URLSearchParams({
           ajax: "1",
-          domainName: query.trim().toLowerCase(),
+          domainName,
         }),
         signal: AbortSignal.timeout(15_000),
       },
@@ -86,6 +105,7 @@ export async function searchIwantmyname(
       };
     }
 
+    const cookieHeader = extractCookieHeader(prepareResp);
     const prepare: PrepareResponse = await prepareResp.json();
     if (prepare.errMsg) {
       return { provider: "iwantmyname", results: [], error: prepare.errMsg };
@@ -137,9 +157,8 @@ export async function searchIwantmyname(
             provider: "iwantmyname",
           });
         } else {
-          // Status pending or other — need to check
+          // Status pending — need to check via second endpoint
           pendingDomains.push(item.domain);
-          // Still add with price info, will update availability later
           results.push({
             domain: item.domain,
             available: false,
@@ -151,19 +170,16 @@ export async function searchIwantmyname(
       }
     }
 
-    // Step 2: Check availability for pending domains
-    if (pendingDomains.length > 0 && prepare.check_group) {
-      const allDomains = Object.values(prepare.check_group).flat();
-      if (allDomains.length > 0) {
-        const checkResults = await checkAvailability(allDomains);
-        if (checkResults) {
-          for (const result of results) {
-            const status = checkResults[result.domain];
-            if (status !== undefined) {
-              result.available =
-                status === STATUS_AVAILABLE ||
-                status === STATUS_PREREGISTRATION;
-            }
+    // Step 2: Check availability for pending domains (requires session cookies)
+    if (pendingDomains.length > 0) {
+      const checkResults = await checkAvailability(pendingDomains, cookieHeader);
+      if (checkResults) {
+        for (const result of results) {
+          const status = checkResults[result.domain];
+          if (status !== undefined) {
+            result.available =
+              status === STATUS_AVAILABLE ||
+              status === STATUS_PREREGISTRATION;
           }
         }
       }
@@ -178,6 +194,7 @@ export async function searchIwantmyname(
 
 async function checkAvailability(
   domains: string[],
+  cookieHeader: string,
 ): Promise<Record<string, number> | null> {
   const allResults: Record<string, number> = {};
 
@@ -198,6 +215,7 @@ async function checkAvailability(
           "X-Requested-With": "XMLHttpRequest",
           "User-Agent": USER_AGENT,
           Accept: "application/json",
+          Cookie: cookieHeader,
         },
         body: new URLSearchParams({
           ajax: "1",
