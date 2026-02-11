@@ -50,7 +50,7 @@ function formatResults(results: ProviderSearchResult[]): string {
 
 function createMcpServer(): McpServer {
   const server = new McpServer({
-    name: "domain-mcp",
+    name: "domains-mcp",
     version: "1.0.0",
   });
 
@@ -183,6 +183,6 @@ const httpServer = createServer(async (req, res) => {
 });
 
 httpServer.listen(config.port, () => {
-  console.log(`domain-mcp listening on port ${config.port}`);
+  console.log(`domains-mcp listening on port ${config.port}`);
   console.log("Providers: iwantmyname, Porkbun");
 });

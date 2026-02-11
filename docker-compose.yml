@@ -1,4 +1,4 @@
-name: domain-mcp
+name: domains-mcp
 
 services:
   server:
