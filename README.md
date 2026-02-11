@@ -1,6 +1,6 @@
 # domains-mcp
 
-MCP server for checking domain availability and pricing. Queries iwantmyname and Porkbun in parallel — no API keys needed.
+MCP server for checking domain availability and pricing. Queries iwantmyname, Porkbun, and NIC Chile in parallel — no API keys needed.
 
 ## Tools
 
@@ -8,21 +8,27 @@ MCP server for checking domain availability and pricing. Queries iwantmyname and
 
 | Tool | Description |
 |------|-------------|
-| `search_domains` | Query both providers in parallel |
+| `search_domains` | Query all three providers in parallel |
 | `search_iwantmyname` | Query iwantmyname only |
 | `search_porkbun` | Query Porkbun only |
+| `search_nicchile` | Query NIC Chile only (.cl domains) |
 
 Parameters: `query` (string), `exact` (boolean, default false — only return the queried domain), `json` (boolean, default false).
+
+`search_nicchile` and `search_domains` also accept `whois` (boolean, default false) — includes WHOIS data (registrant, dates, nameservers) for taken .cl domains.
 
 ### Bulk
 
 | Tool | Description |
 |------|-------------|
-| `bulk_search_domains` | Check multiple domains across both providers |
+| `bulk_search_domains` | Check multiple domains across all providers |
 | `bulk_search_iwantmyname` | Check multiple domains via iwantmyname |
 | `bulk_search_porkbun` | Check multiple domains via Porkbun |
+| `bulk_search_nicchile` | Check multiple .cl domains via NIC Chile |
 
 Parameters: `domains` (string array), `json` (boolean, default false).
+
+`bulk_search_nicchile` and `bulk_search_domains` also accept `whois` (boolean, default false).
 
 ## Run
 
