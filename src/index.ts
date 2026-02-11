@@ -5,9 +5,48 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { searchIwantmyname } from "./providers/iwantmyname.js";
 import { searchPorkbun } from "./providers/porkbun.js";
-import type { ProviderSearchResult } from "./providers/types.js";
+import type {
+  DomainResult,
+  ProviderSearchResult,
+} from "./providers/types.js";
 
 const config = loadConfig();
+
+function formatDomain(d: DomainResult): string {
+  const status = d.available ? "AVAILABLE" : "taken";
+  const price = d.price
+    ? `$${d.price.registration}` +
+      (d.price.renewal !== d.price.registration
+        ? ` (renews $${d.price.renewal})`
+        : "")
+    : "no price";
+  const premium = d.premium ? " [premium]" : "";
+  return `- **${d.domain}** — ${status} — ${price}${premium}`;
+}
+
+function formatResults(results: ProviderSearchResult[]): string {
+  const sections: string[] = [];
+  for (const r of results) {
+    if (r.error) {
+      sections.push(`### ${r.provider}\n\nError: ${r.error}`);
+      continue;
+    }
+    const available = r.results.filter((d) => d.available);
+    const taken = r.results.filter((d) => !d.available);
+    const lines: string[] = [`### ${r.provider}`];
+    if (available.length > 0) {
+      lines.push("", "**Available:**", ...available.map(formatDomain));
+    }
+    if (taken.length > 0) {
+      lines.push("", "**Taken:**", ...taken.map(formatDomain));
+    }
+    if (r.results.length === 0) {
+      lines.push("", "No results.");
+    }
+    sections.push(lines.join("\n"));
+  }
+  return sections.join("\n\n");
+}
 
 function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -19,6 +58,11 @@ function createMcpServer(): McpServer {
     query: z
       .string()
       .describe("Domain name to search, e.g. 'example.ai'"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
   };
 
   server.registerTool(
@@ -28,13 +72,12 @@ function createMcpServer(): McpServer {
         "Search domain availability and pricing via iwantmyname",
       inputSchema: querySchema,
     },
-    async ({ query }) => {
+    async ({ query, json }) => {
       const result = await searchIwantmyname(query);
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-      };
+      const text = json
+        ? JSON.stringify(result, null, 2)
+        : formatResults([result]);
+      return { content: [{ type: "text" as const, text }] };
     },
   );
 
@@ -44,13 +87,12 @@ function createMcpServer(): McpServer {
       description: "Search domain availability and pricing via Porkbun",
       inputSchema: querySchema,
     },
-    async ({ query }) => {
+    async ({ query, json }) => {
       const result = await searchPorkbun(query);
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-      };
+      const text = json
+        ? JSON.stringify(result, null, 2)
+        : formatResults([result]);
+      return { content: [{ type: "text" as const, text }] };
     },
   );
 
@@ -61,17 +103,16 @@ function createMcpServer(): McpServer {
         "Search domain availability and pricing across all providers (iwantmyname + Porkbun) in parallel",
       inputSchema: querySchema,
     },
-    async ({ query }) => {
+    async ({ query, json }) => {
       const searches: Promise<ProviderSearchResult>[] = [
         searchIwantmyname(query),
         searchPorkbun(query),
       ];
       const results = await Promise.all(searches);
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(results, null, 2) },
-        ],
-      };
+      const text = json
+        ? JSON.stringify(results, null, 2)
+        : formatResults(results);
+      return { content: [{ type: "text" as const, text }] };
     },
   );
 
