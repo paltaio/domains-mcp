@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { searchIwantmyname, searchIwantmynameBulk } from "./providers/iwantmyname.js";
+import { searchNicChile, searchNicChileBulk } from "./providers/nicchile.js";
 import { searchPorkbun, searchPorkbunBulk } from "./providers/porkbun.js";
 import type {
   DomainResult,
@@ -21,7 +22,24 @@ function formatDomain(d: DomainResult): string {
         : "")
     : "no price";
   const premium = d.premium ? " [premium]" : "";
-  return `- **${d.domain}** — ${status} — ${price}${premium}`;
+  let line = `- **${d.domain}** — ${status} — ${price}${premium}`;
+
+  if (d.whois) {
+    const w = d.whois;
+    const fields: string[] = [];
+    if (w.registrant) fields.push(`  Registrant: ${w.registrant}`);
+    if (w.organization) fields.push(`  Organization: ${w.organization}`);
+    if (w.registrar) fields.push(`  Registrar: ${w.registrar}`);
+    if (w.creationDate) fields.push(`  Created: ${w.creationDate}`);
+    if (w.expirationDate) fields.push(`  Expires: ${w.expirationDate}`);
+    if (w.lastModified) fields.push(`  Modified: ${w.lastModified}`);
+    if (w.nameservers.length > 0)
+      fields.push(`  Nameservers: ${w.nameservers.join(", ")}`);
+    if (w.website) fields.push(`  Website: ${w.website}`);
+    if (fields.length > 0) line += "\n" + fields.join("\n");
+  }
+
+  return line;
 }
 
 function formatResults(results: ProviderSearchResult[]): string {
@@ -125,17 +143,71 @@ function createMcpServer(): McpServer {
     },
   );
 
+  const nicChileQuerySchema = {
+    query: z
+      .string()
+      .describe("Domain name to search, e.g. 'example.cl' (.cl will be appended if missing)"),
+    whois: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include WHOIS data (registrant, dates, nameservers) for taken domains"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
+  };
+
+  server.registerTool(
+    "search_nicchile",
+    {
+      description:
+        "Search .cl domain availability and WHOIS via NIC Chile (the official .cl registry)",
+      inputSchema: nicChileQuerySchema,
+    },
+    async ({ query, whois, json }) => {
+      const result = await searchNicChile(query, whois);
+      const text = json
+        ? JSON.stringify([result], null, 2)
+        : formatResults([result]);
+      return { content: [{ type: "text" as const, text }] };
+    },
+  );
+
+  const combinedQuerySchema = {
+    query: z
+      .string()
+      .describe("Domain name to search, e.g. 'example.ai'"),
+    exact: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Only return the exact domain queried, no suggestions"),
+    whois: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include WHOIS data from NIC Chile for taken .cl domains"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
+  };
+
   server.registerTool(
     "search_domains",
     {
       description:
-        "Search domain availability and pricing across all providers (iwantmyname + Porkbun) in parallel",
-      inputSchema: querySchema,
+        "Search domain availability and pricing across all providers (iwantmyname + Porkbun + NIC Chile) in parallel",
+      inputSchema: combinedQuerySchema,
     },
-    async ({ query, exact, json }) => {
+    async ({ query, exact, whois, json }) => {
       const searches: Promise<ProviderSearchResult>[] = [
         searchIwantmyname(query),
         searchPorkbun(query),
+        searchNicChile(query, whois),
       ];
       const results = await Promise.all(searches);
       const filtered = exact ? filterExact(results, query) : results;
@@ -191,17 +263,66 @@ function createMcpServer(): McpServer {
     },
   );
 
+  const nicChileBulkSchema = {
+    domains: z
+      .array(z.string())
+      .describe("List of .cl domain names, e.g. ['example.cl', 'test.cl']"),
+    whois: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include WHOIS data for taken domains"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
+  };
+
+  server.registerTool(
+    "bulk_search_nicchile",
+    {
+      description:
+        "Check .cl domain availability and WHOIS for multiple domains via NIC Chile",
+      inputSchema: nicChileBulkSchema,
+    },
+    async ({ domains, whois, json }) => {
+      const result = await searchNicChileBulk(domains, whois);
+      const text = json
+        ? JSON.stringify([result], null, 2)
+        : formatResults([result]);
+      return { content: [{ type: "text" as const, text }] };
+    },
+  );
+
+  const combinedBulkSchema = {
+    domains: z
+      .array(z.string())
+      .describe("List of full domain names, e.g. ['source.ai', 'test.dev']"),
+    whois: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include WHOIS data from NIC Chile for taken .cl domains"),
+    json: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return raw JSON instead of formatted Markdown"),
+  };
+
   server.registerTool(
     "bulk_search_domains",
     {
       description:
-        "Check availability and pricing for multiple exact domains across all providers in parallel",
-      inputSchema: bulkSchema,
+        "Check availability and pricing for multiple exact domains across all providers (iwantmyname + Porkbun + NIC Chile) in parallel",
+      inputSchema: combinedBulkSchema,
     },
-    async ({ domains, json }) => {
+    async ({ domains, whois, json }) => {
       const results = await Promise.all([
         searchIwantmynameBulk(domains),
         searchPorkbunBulk(domains),
+        searchNicChileBulk(domains, whois),
       ]);
       const filtered = filterDomains(results, domains);
       const text = json
@@ -279,5 +400,5 @@ const httpServer = createServer(async (req, res) => {
 
 httpServer.listen(config.port, () => {
   console.log(`domains-mcp listening on port ${config.port}`);
-  console.log("Providers: iwantmyname, Porkbun");
+  console.log("Providers: iwantmyname, Porkbun, NIC Chile");
 });
