@@ -79,8 +79,6 @@ export async function searchPorkbun(
       };
     }
 
-    await sleep(2500);
-
     const results = await pollForResults(
       session.checkId,
       session.searchHash,
@@ -185,9 +183,6 @@ export async function searchPorkbunBulk(
       };
     }
 
-    // Step 3: Poll for results
-    await sleep(2500);
-
     const results = await pollForResults(
       checkIdMatch[1],
       searchHashMatch[1],
@@ -207,9 +202,11 @@ async function pollForResults(
   searchHash: string,
   csrfPb: string,
   cookieHeader: string,
-  maxAttempts = 5,
 ): Promise<DomainResult[]> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  const DELAYS = [500, 500, 500, 1000, 2000, 3000, 3000, 3000, 3000, 3000];
+  const MAX_ATTEMPTS = DELAYS.length;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const resp = await fetch(`${BASE_URL}/api/domains/getChecks`, {
       method: "POST",
       headers: {
@@ -228,21 +225,23 @@ async function pollForResults(
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (!resp.ok) continue;
+    if (!resp.ok) {
+      await sleep(DELAYS[attempt]);
+      continue;
+    }
 
     const data: PorkbunResponse = await resp.json();
     if (!data.results || data.results.length === 0) {
-      await sleep(1500);
+      await sleep(DELAYS[attempt]);
       continue;
     }
 
     const hasPending = data.results.some((r) => r.result === "PENDING");
-    if (hasPending && attempt < maxAttempts - 1) {
-      await sleep(1500);
+    if (hasPending && attempt < MAX_ATTEMPTS - 1) {
+      await sleep(DELAYS[attempt]);
       continue;
     }
 
-    // Parse results
     return data.results
       .filter((r) => r.result !== "PENDING")
       .map((r) => parsePorkbunResult(r));
